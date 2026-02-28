@@ -1,0 +1,9 @@
+# Core Dependencies for OxyVision rPPG Project
+mediapipe
+opencv-python
+numpy
+scipy
+torch
+torchvision
+matplotlib
+pandas

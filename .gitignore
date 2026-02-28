@@ -1,0 +1,29 @@
+# Environments
+venv/
+.env
+
+# Data and Cache
+data/
+Preprocessed*/
+*.npy
+*.pickle
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs and Model Checkpoints
+runs/
+PreTrainedModels/
+
+# Specific ignores within the toolbox to keep the repo light
+rPPG-Toolbox/final_model_release/
+rPPG-Toolbox/model_outputs/
+
+# Temporary files
+temp.yaml
+.DS_Store
+
+# Plots
+*.png
