@@ -1,9 +1,17 @@
 # Core Dependencies for OxyVision rPPG Project
-mediapipe
-opencv-python
-numpy
-scipy
 torch
 torchvision
+av
+Pillow
+numpy
+scipy
 matplotlib
+yacs
+PyYAML
+tqdm
 pandas
+scikit-image
+opencv-python
+mat73
+neurokit2
+timm
