@@ -5,7 +5,6 @@ import av
 from PIL import Image 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,16 +13,14 @@ from tqdm import tqdm
 # Add rPPG-Toolbox to path
 sys.path.append(os.path.join(os.getcwd(), 'rPPG-Toolbox'))
 from models_custom import PhysNetBaseline, PhysNetConstrained
-from loss_custom import PhysiologicalLoss
 
 class SafeComparisonDataset(Dataset):
     def __init__(self, data_path, subjects, chunk_length=128, image_size=72):
         self.chunk_length = chunk_length
-        self.image_size = image_size
         self.clips, self.labels = [], []
         
         vid_files = sorted(glob.glob(os.path.join(data_path, "**", "vid.avi"), recursive=True))
-        for vid_path in tqdm(vid_files, desc="Loading Data"):
+        for vid_path in vid_files:
             folder = os.path.basename(os.path.dirname(vid_path))
             if not any(s in folder for s in subjects): continue
             
@@ -58,68 +55,85 @@ class SafeComparisonDataset(Dataset):
         return torch.tensor(self.clips[i], dtype=torch.float32), \
                torch.tensor(self.labels[i], dtype=torch.float32)
 
-def train_and_evaluate(model_type, train_loader, val_loader, device):
-    print(f"Initializing {model_type} approach...")
-    if model_type == 'baseline':
-        model = PhysNetBaseline(frames=128).to(device)
-        criterion = nn.MSELoss()
-    else:
-        model = PhysNetConstrained(frames=128).to(device)
-        criterion = PhysiologicalLoss(lambda_smooth=1.0)
-    
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    print(f"Training {model_type} for 5 epochs...")
-    for epoch in range(5):
-        model.train()
-        for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            optimizer.zero_grad(); out, _, _, _ = model(inputs)
-            loss = criterion(out, labels); loss.backward(); optimizer.step()
-    
-    model.eval()
-    all_preds, all_labels = [], []
-    with torch.no_grad():
-        for inputs, labels in val_loader:
-            out, _, _, _ = model(inputs.to(device))
-            all_preds.append(out.cpu().numpy()); all_labels.append(labels.numpy())
-    
-    mae = np.mean(np.abs(np.concatenate(all_preds) - np.concatenate(all_labels)))
-    return model, all_preds[0][0], all_labels[0][0], mae
-
 def run_final_comparison():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_subs = ["subject1", "subject4", "subject8", "subject9"]
-    val_subs = ["subject5"] 
+    print(f"Using device: {device}")
     
-    print("--- Loading Data ---")
-    train_ds = SafeComparisonDataset("./data", train_subs)
-    val_ds = SafeComparisonDataset("./data", val_subs)
-    train_loader = DataLoader(train_ds, batch_size=4, shuffle=True)
+    BEST_MODEL_PATH = "PreTrainedModels/best_model.pth"
+    if not os.path.exists(BEST_MODEL_PATH):
+        print(f"Error: {BEST_MODEL_PATH} not found. Please run train_hackathon.py first.")
+        return
+
+    # 1. Setup Models
+    print("--- Initializing Models ---")
+    # Untrained Baseline
+    baseline_model = PhysNetBaseline(frames=128).to(device)
+    baseline_model.eval()
+    
+    # Our Best Constrained Model
+    constrained_model = PhysNetConstrained(frames=128).to(device)
+    print(f"Loading pre-trained weights from {BEST_MODEL_PATH}...")
+    constrained_model.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=device))
+    constrained_model.eval()
+
+    # 2. Load Evaluation Data (Subject 5 - the breath hold subject)
+    print("--- Loading Validation Data (Subject 5) ---")
+    val_ds = SafeComparisonDataset("./data", ["subject5"])
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
 
-    print("\n--- Training Approach 1: Baseline (Data-Driven) ---")
-    m1, pred1, truth, mae1 = train_and_evaluate('baseline', train_loader, val_loader, device)
-    
-    print("\n--- Training Approach 2: Constrained (Physiological) ---")
-    m2, pred2, _, mae2 = train_and_evaluate('constrained', train_loader, val_loader, device)
+    if len(val_ds) == 0:
+        print("Error: Could not load subject5 data.")
+        return
 
-    print(f"\nFinal Results:\nBaseline MAE: {mae1:.4f}%\nConstrained MAE: {mae2:.4f}%")
+    # 3. Perform Inference
+    print("--- Running Inference ---")
+    all_baseline_preds = []
+    all_constrained_preds = []
+    all_truth = []
 
-    # Visualization
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            inputs = inputs.to(device)
+            
+            # Baseline Inference
+            out_b, _, _, _ = baseline_model(inputs)
+            all_baseline_preds.append(out_b.cpu().numpy())
+            
+            # Constrained Inference
+            out_c, _, _, _ = constrained_model(inputs)
+            all_constrained_preds.append(out_c.cpu().numpy())
+            
+            all_truth.append(labels.numpy())
+
+    # Calculate MAEs
+    baseline_mae = np.mean(np.abs(np.concatenate(all_baseline_preds) - np.concatenate(all_truth)))
+    constrained_mae = np.mean(np.abs(np.concatenate(all_constrained_preds) - np.concatenate(all_truth)))
+
+    print(f"\nBenchmark Results on Subject 5:")
+    print(f"Untrained Baseline MAE: {baseline_mae:.4f}%")
+    print(f"Pre-trained Constrained MAE: {constrained_mae:.4f}%")
+
+    # 4. Visualization
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
-    # Subplot 1: Time Series
-    ax1.plot(truth, color='black', label='True SpO2', linewidth=2)
-    ax1.plot(pred1, color='red', linestyle='--', label='Baseline Pred')
-    ax1.plot(pred2, color='green', label='Constrained Pred')
-    ax1.set_title('SpO2 Estimation Comparison'); ax1.set_ylabel('SpO2 (%)'); ax1.legend()
+    # Subplot 1: Time Series Comparison
+    # We take the first chunk for plotting
+    truth = all_truth[0][0]
+    pred_b = all_baseline_preds[0][0]
+    pred_c = all_constrained_preds[0][0]
+    
+    ax1.plot(truth, color='black', label='Ground Truth', linewidth=2)
+    ax1.plot(pred_b, color='red', linestyle='--', label='Baseline (Untrained)')
+    ax1.plot(pred_c, color='green', label='OxyVision (Best Model)', linewidth=2)
+    ax1.set_title('Real-time SpO2 Estimation Benchmarking'); ax1.set_ylabel('SpO2 (%)'); ax1.legend()
+    ax1.set_ylim(80, 105)
     
     # Subplot 2: Bar Chart
-    ax2.bar(['Baseline', 'Constrained'], [mae1, mae2], color=['red', 'green'])
-    ax2.set_title('Mean Absolute Error (Lower is Better)'); ax2.set_ylabel('MAE (%)')
+    ax2.bar(['Baseline', 'OxyVision'], [baseline_mae, constrained_mae], color=['red', 'green'])
+    ax2.set_title('Mean Absolute Error Comparison'); ax2.set_ylabel('MAE (%)')
     
     plt.tight_layout(); plt.savefig('final_hackathon_comparison.png')
-    print("\nComparison visualization saved as 'final_hackathon_comparison.png'")
+    print("\nBenchmark visualization saved as 'final_hackathon_comparison.png'")
 
 if __name__ == "__main__":
     run_final_comparison()

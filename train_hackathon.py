@@ -83,9 +83,20 @@ class UltraSafeUBFCDataset(Dataset):
             )
 
             for start in range(0, n - chunk_length + 1, chunk_length):
-                self.clips.append(np.transpose(diff_data[start:start+chunk_length], (3, 0, 1, 2)))
-                self.labels.append(resampled_spo2[start:start+chunk_length])
-                self.subject_ids.append(folder_name)
+                clip = np.transpose(diff_data[start:start+chunk_length], (3, 0, 1, 2))
+                lbl = resampled_spo2[start:start+chunk_length]
+                
+                # --- DATA AUGMENTATION: OVERSAMPLING LOW SpO2 ---
+                # If any frame in this chunk is < 96%, repeat it 10x
+                if np.min(lbl) < 96.0:
+                    for _ in range(10):
+                        self.clips.append(clip)
+                        self.labels.append(lbl)
+                        self.subject_ids.append(folder_name)
+                else:
+                    self.clips.append(clip)
+                    self.labels.append(lbl)
+                    self.subject_ids.append(folder_name)
 
     def __len__(self): return len(self.clips)
     def __getitem__(self, idx):
@@ -118,6 +129,8 @@ def train_hackathon():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     train_losses, val_maes = [], []
+    best_mae = float('inf')
+    os.makedirs("PreTrainedModels", exist_ok=True)
 
     for epoch in range(100):
         model.train()
@@ -144,7 +157,16 @@ def train_hackathon():
         
         avg_mae = total_mae / n_v
         val_maes.append(avg_mae)
-        print(f"Epoch [{epoch+1}/100] - Loss: {train_losses[-1]:.4f} - Val MAE: {avg_mae:.4f}%")
+
+        # Save Best Model
+        if avg_mae < best_mae:
+            best_mae = avg_mae
+            torch.save(model.state_dict(), "PreTrainedModels/best_model.pth")
+            save_msg = " (Model Saved!)"
+        else:
+            save_msg = ""
+
+        print(f"Epoch [{epoch+1}/100] - Loss: {train_losses[-1]:.4f} - Val MAE: {avg_mae:.4f}%{save_msg}")
 
     # --- FINAL PLOT ---
     plt.figure(figsize=(15, 5))
