@@ -97,6 +97,8 @@ def run_final_comparison():
             
             # Baseline Inference
             out_b, _, _, _ = baseline_model(inputs)
+            # Apply range constraint so it's visible on the 80-100% plot
+            out_b = 80 + 20 * torch.sigmoid(out_b)
             all_baseline_preds.append(out_b.cpu().numpy())
             
             # Constrained Inference

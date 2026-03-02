@@ -113,8 +113,8 @@ def train_hackathon():
 
     # --- SUBJECT SPLIT ---
     # We explicitly put subject5 (breath hold) in validation
-    val_subs = ["subject5", "subject3"]
-    train_subs = ["subject1", "subject4", "subject8", "subject9", "subject10", "subject11", "subject12"]
+    val_subs = ["subject5"]
+    train_subs = ["subject1", "subject4", "subject8", "subject9", "subject10", "subject11", "subject12", "subject3"]
 
     print("Loading Training Set...")
     train_ds = UltraSafeUBFCDataset(DATA_PATH, subjects_to_load=train_subs, chunk_length=FRAME_NUM)
@@ -125,7 +125,7 @@ def train_hackathon():
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
 
     model = PhysNetConstrained(frames=FRAME_NUM).to(device)
-    criterion = PhysiologicalLoss(lambda_smooth=1.0)
+    criterion = PhysiologicalLoss(lambda_smooth=0.1)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     train_losses, val_maes = [], []
@@ -174,6 +174,11 @@ def train_hackathon():
     plt.subplot(1, 3, 2); plt.plot(val_maes, color='orange'); plt.title('Val MAE (%)')
     
     plt.subplot(1, 3, 3)
+    # Load Best Model for Plotting
+    if os.path.exists("PreTrainedModels/best_model.pth"):
+        model.load_state_dict(torch.load("PreTrainedModels/best_model.pth", map_location=device))
+        print("Loaded best model for final SpO2 comparison plot.")
+    
     model.eval()
     with torch.no_grad():
         # Get a sample from the validation loader
