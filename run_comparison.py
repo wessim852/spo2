@@ -97,8 +97,6 @@ def run_final_comparison():
             
             # Baseline Inference
             out_b, _, _, _ = baseline_model(inputs)
-            # Apply range constraint so it's visible on the 80-100% plot
-            out_b = 80 + 20 * torch.sigmoid(out_b)
             all_baseline_preds.append(out_b.cpu().numpy())
             
             # Constrained Inference
@@ -122,10 +120,12 @@ def run_final_comparison():
     # We take the first chunk for plotting
     truth = all_truth[0][0]
     pred_b = all_baseline_preds[0][0]
+    # Apply constraint ONLY for visualization purposes so it appears in the 80-105% range
+    pred_b_viz = 80 + 20 * (1 / (1 + np.exp(-pred_b)))
     pred_c = all_constrained_preds[0][0]
     
     ax1.plot(truth, color='black', label='Ground Truth', linewidth=2)
-    ax1.plot(pred_b, color='red', linestyle='--', label='Baseline (Untrained)')
+    ax1.plot(pred_b_viz, color='red', linestyle='--', label='Baseline (Untrained)')
     ax1.plot(pred_c, color='green', label='OxyVision (Best Model)', linewidth=2)
     ax1.set_title('Real-time SpO2 Estimation Benchmarking'); ax1.set_ylabel('SpO2 (%)'); ax1.legend()
     ax1.set_ylim(80, 105)
